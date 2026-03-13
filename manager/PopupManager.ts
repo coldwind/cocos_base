@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, find, instantiate, Node, Prefab, Sprite, tween, UIOpacity, UITransform, Vec3, Widget } from 'cc';
+import { _decorator, find, instantiate, Node, Prefab, Sprite, tween, UIOpacity, UITransform, Vec3, Widget } from 'cc';
 import { YResHandle } from './ResManager';
 import { PopupBase } from './PopupBase';
 const { ccclass, property } = _decorator;
@@ -10,15 +10,23 @@ interface IYPopupOption {
 }
 
 @ccclass('PopupManager')
-export class PopupManager extends Component {
-
+export class PopupManager {
+    private static handle:PopupManager = new PopupManager();
     private parentNode: Node = null;
     private maskBg: Node = null;
     private content: Node = null;
     private forever: boolean = false;
     private pfb: Prefab = null;
 
-    private async Init(bundle:string, path:string) {
+    public static inst():PopupManager {
+        if (PopupManager.handle == null) {
+            this.handle = new PopupManager();
+        }
+
+        return this.handle;
+    }
+
+    public async init(bundle:string, path:string) {
         if (this.pfb == null) {
             this.pfb = await YResHandle.loadPrefab(bundle, path);
         }
@@ -69,7 +77,9 @@ export class PopupManager extends Component {
                 }
 
                 if ("forever" in data) {
-                    this.forever = data.forever;
+                    if (data.forever == true) {
+                        this.forever = true;
+                    }
                 }
             } else {
                 this.maskBg.active = true;
