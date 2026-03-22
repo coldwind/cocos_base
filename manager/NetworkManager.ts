@@ -1,141 +1,224 @@
-import { _decorator } from 'cc';
+import { _decorator } from "cc";
+import { YToastHandle } from "./ToastManager";
 const { ccclass, property } = _decorator;
 
-@ccclass('NetworkManager')
+export interface ReqData {
+  ok: boolean;
+  res: any;
+  err: Error;
+}
+
+export interface WSMessage {
+  data: any;
+  error?: Error;
+  type: "message" | "error" | "close" | "open" | "retry";
+}
+
+export interface WSConnection {
+  ws: WebSocket;
+  close: () => void;
+}
+
+@ccclass("NetworkManager")
 export class NetworkManager {
+  private domain: string = "http://localhost/";
+  private headers: [string, string][] = [];
 
-    private domain: string = "http://localhost/";
+  /** 设置请求头 */
+  public setHeaders(headers: [string, string][]) {
+    this.headers = [...headers];
+  }
 
-    private headers: [string, string][] = [];
-
-    public setHeaders(headers: [string, string][]) {
-        this.headers = headers;
+  /** 设置域名，自动补全末尾 / */
+  public setDomain(domain: string) {
+    if (!domain.endsWith("/")) {
+      domain += "/";
     }
+    this.domain = domain;
+  }
 
-    public setDomain(domain: string) {
-        let char = domain.substring(domain.length - 1);
-        console.log("setDomain", char);
-        if (char != "/") {
-            domain += "/";
-        }
-        this.domain = domain;
-    }
+  /** POST 请求 */
+  public async post(path: string, data: any): Promise<ReqData> {
+    const url = this.buildUrl(path);
+    return this.requestPromise(url, "POST", data);
+  }
 
-    public async post(path: string, data: any): Promise<any> {
-        let protocol = path.substring(0, 7);
-        if (protocol != "http://" && protocol != "https:/") {
-            path = `${this.domain}${path}`;
-        }
+  /** GET 请求 */
+  public async get(path: string, data?: any): Promise<ReqData> {
+    const url = this.buildUrl(path);
+    return this.requestPromise(url, "GET", data);
+  }
 
-        return new Promise<any>((resolve, reject) => {
-            try {
-                this.req(path, "POST", data, (data, error) => {
-                    if (error != null) {
-                        console.log("post error", error);
-                        return resolve(null);
-                    } else {
-                        let jData = JSON.parse(data);
-                        return resolve(jData);
-                    }
-                });
-            } catch (e) {
-                console.log("post error", e);
-            }
-        });
-    }
+  /** WebSocket 连接 */
+  public connectWebSocket(
+    wsUrl: string,
+    callback: (msg: WSMessage) => void,
+    retryCount: number = 0,
+  ): WSConnection {
+    let currentWs: WebSocket | null = null;
+    let retriesLeft = retryCount;
+    let isManualClose = false;
 
-    public async get(path: string, data?: any): Promise<any> {
-        let protocol = path.substring(0, 7);
-        console.log("protocol", protocol);
-        if (protocol != "http://" && protocol != "https:/") {
-            path = `${this.domain}${path}`;
-        }
+    const connect = () => {
+      currentWs = new WebSocket(wsUrl);
 
-        return new Promise<any>((resolve, reject) => {
-            try {
-                this.req(path, "GET", data, (data, error) => {
+      currentWs.onopen = () => {
+        retriesLeft = retryCount;
+        callback({ data: null, type: "open" });
+      };
 
-                    if (error != null) {
-                        console.log("post error", error);
-                        return resolve(null);
-                    } else {
-                        let jData = JSON.parse(data);
-                        return resolve(jData);
-                    }
-                });
-            } catch (e) {
-                console.log("post error", e);
-            }
-        });
-    }
-
-    public req(url: string, method: string, data: any, cb: (data: any, error: any) => void) {
+      currentWs.onmessage = (event) => {
         try {
-            //新建Http
-            let xhr = new XMLHttpRequest();
-            //接收数据
-            xhr.onreadystatechange = function () {
-                if (xhr.readyState == 4 && (xhr.status >= 200 && xhr.status < 400)) {
-                    var response = xhr.responseText;
-                    if (!response) {
-                        cb("", "response not found");
-                        return;
-                    }
-
-                    cb(response, null);
-                } else if (xhr.readyState == 4 && xhr.status == 500) {
-                    var response = xhr.responseText;
-                    cb(response, null)
-                }
-            };
-            //错误处理
-            xhr.onerror = function (evt) {
-                console.log("onerror", evt);
-
-                cb(null, evt);
-            }
-            //初始化一个请求，GET方式，true异步请求
-            xhr.open(method, url, true);
-            let contentType = "";
-
-            if (this.headers.length > 0) {
-                for (let header of this.headers) {
-                    if (header[0].toLowerCase() == "content-type") {
-                        contentType = header[1].toLowerCase();
-                    }
-                    xhr.setRequestHeader(header[0], header[1]);
-                }
-            }
-            if (contentType == "") {
-                contentType = "application/x-www-form-urlencoded";
-                xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-            }
-
-            let params = [];
-            let sendData = "";
-            if (data) {
-                if (contentType == "application/x-www-form-urlencoded") {
-                    Object.keys(data).forEach((key) => {
-                        let value = data[key]
-                        // 如果值为undefined我们将其置空
-                        if (typeof value === 'undefined') {
-                            value = ''
-                        }
-                        // 对于需要编码的文本（比如说中文）我们要进行编码
-                        params.push([key, encodeURIComponent(value)].join('='))
-                    });
-                    sendData = params.join('&');
-                } else if (contentType == "application/json") {
-                    sendData = JSON.stringify(data);
-                }
-            }
-
-            //发送请求
-            xhr.send(sendData);
+          const data = event.data;
+          const parsedData = typeof data === "string" ? JSON.parse(data) : data;
+          callback({ data: parsedData, type: "message" });
         } catch (e) {
-            console.log("req error");
+          callback({ data: event.data, type: "message" });
         }
+      };
+
+      currentWs.onerror = (event) => {
+        const err = new Error("WebSocket 连接错误");
+        console.error("WebSocket error:", event);
+        callback({ data: null, error: err, type: "error" });
+      };
+
+      currentWs.onclose = (event) => {
+        if (isManualClose) {
+          const err = new Error(
+            `WebSocket 连接关闭: code=${event.code}, reason=${event.reason}`,
+          );
+          callback({ data: null, error: err, type: "close" });
+          return;
+        }
+
+        if (retriesLeft > 0) {
+          retriesLeft--;
+          const err = new Error(
+            `WebSocket 连接断开，正在重试(${retryCount - retriesLeft}/${retryCount})`,
+          );
+          callback({ data: null, error: err, type: "retry" });
+          setTimeout(connect, 1000);
+        } else {
+          const err = new Error(
+            `WebSocket 连接关闭: code=${event.code}, reason=${event.reason}`,
+          );
+          callback({ data: null, error: err, type: "close" });
+        }
+      };
+    };
+
+    connect();
+
+    return {
+      ws: currentWs!,
+      close: () => {
+        isManualClose = true;
+        if (currentWs) {
+          currentWs.close();
+        }
+      },
+    };
+  }
+
+  // ==============================================
+  // 内部工具方法
+  // ==============================================
+
+  /** 构建最终请求 URL */
+  private buildUrl(path: string): string {
+    if (path.startsWith("http://") || path.startsWith("https://")) {
+      return path;
     }
+    return this.domain + path;
+  }
+
+  /**
+   * 核心：将 XMLHttpRequest 包装为标准 Promise
+   */
+  private requestPromise(
+    url: string,
+    method: string,
+    data: any,
+  ): Promise<ReqData> {
+    return new Promise((resolve, reject) => {
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open(method, url, true);
+
+        // 挂载请求头
+        let contentType = "";
+        for (const [key, val] of this.headers) {
+          if (key.toLowerCase() === "content-type") {
+            contentType = val.toLowerCase();
+          }
+          xhr.setRequestHeader(key, val);
+        }
+
+        // 默认 Content-Type
+        if (!contentType) {
+          contentType = "application/x-www-form-urlencoded";
+          xhr.setRequestHeader("Content-Type", contentType);
+        }
+
+        // 处理请求数据
+        let sendData: string | FormData = "";
+        if (data) {
+          if (contentType === "application/x-www-form-urlencoded") {
+            const params = new URLSearchParams();
+            for (const key in data) {
+              params.append(key, data[key] ?? "");
+            }
+            sendData = params.toString();
+          } else if (contentType === "application/json") {
+            sendData = JSON.stringify(data);
+          }
+        }
+
+        // 请求完成
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const res = xhr.responseText;
+              const json = res ? JSON.parse(res) : {};
+              resolve({ ok: true, res: json, err: null });
+            } catch (e) {
+              YToastHandle.show("JSON 解析失败");
+              resolve({ ok: false, res: null, err: e });
+            }
+          } else {
+            YToastHandle.show("网络请求失败");
+            const err = new Error(`请求失败 ${xhr.status}`);
+            console.error(err.message);
+            resolve({ ok: false, res: null, err: err });
+          }
+        };
+
+        // 请求异常
+        xhr.onerror = () => {
+          const err = new Error("网络请求异常");
+          console.error(err.message);
+          reject(err);
+        };
+
+        // 超时
+        xhr.ontimeout = () => {
+          YToastHandle.show("请求超时");
+          const err = new Error("请求超时");
+          console.error(err.message);
+          resolve({ ok: false, res: null, err: err });
+        };
+
+        // 发送
+        xhr.send(sendData);
+      } catch (e) {
+        console.error("requestPromise 异常:", e);
+        reject(e);
+      }
+    });
+  }
+
+  /** 废弃旧方法，保留兼容 */
 }
 
 export const YNetworkHandle = new NetworkManager();
