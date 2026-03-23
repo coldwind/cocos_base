@@ -45,8 +45,15 @@ export class NetworkManager {
 
   /** GET 请求 */
   public async get(path: string, data?: any): Promise<ReqData> {
-    const url = this.buildUrl(path);
-    return this.requestPromise(url, "GET", data);
+    let url = this.buildUrl(path);
+    if (data) {
+      let params = [];
+      for (let k in data) {
+        params.push(`${k}=${data[k]}`);
+      }
+      url += "?" + params.join("&");
+    }
+    return this.requestPromise(url, "GET", null);
   }
 
   /** WebSocket 连接 */
