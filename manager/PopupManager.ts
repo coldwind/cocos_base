@@ -110,13 +110,9 @@ export class PopupManager {
       currentNode.node.setSiblingIndex(128);
 
       if (data) {
-        let t = 0.3;
-        if ("time" in data) {
-          t = data.time;
-        }
+        const t = data.time ?? 0.3;
 
         if ("style" in data) {
-          currentNode.maskBg.active = false;
           let designWidth = view.getDesignResolutionSize().width;
           let contentWidth =
             currentNode.content.getComponent(UITransform).width;
@@ -232,10 +228,7 @@ export class PopupManager {
 
     currentNode.maskBg.active = false;
     if (data) {
-      let t = 0.3;
-      if ("time" in data) {
-        t = data.time;
-      }
+      const t = data.time ?? 0.3;
 
       if ("style" in data) {
         let designWidth = view.getDesignResolutionSize().width;
