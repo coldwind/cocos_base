@@ -57,75 +57,78 @@ export class NetworkManager {
   }
 
   /** WebSocket 连接 */
-  public connectWebSocket(
+  public async connectWebSocket(
     wsUrl: string,
     callback: (msg: WSMessage) => void,
     retryCount: number = 0,
-  ): WSConnection {
-    let currentWs: WebSocket | null = null;
-    let retriesLeft = retryCount;
-    let isManualClose = false;
+  ): Promise<WSConnection> {
+    return new Promise((resolve, reject) => {
+      let currentWs: WebSocket | null = null;
+      let retriesLeft = retryCount;
+      let isManualClose = false;
 
-    const connect = () => {
-      currentWs = new WebSocket(wsUrl);
+      const connect = () => {
+        currentWs = new WebSocket(wsUrl);
 
-      currentWs.onopen = () => {
-        retriesLeft = retryCount;
-        callback({ data: null, type: "open" });
+        currentWs.onopen = () => {
+          retriesLeft = retryCount;
+          callback({ data: null, type: "open" });
+          resolve({
+            ws: currentWs!,
+            close: () => {
+              isManualClose = true;
+              if (currentWs) {
+                currentWs.close();
+              }
+            },
+          });
+        };
+
+        currentWs.onmessage = (event) => {
+          try {
+            const data = event.data;
+            const parsedData =
+              typeof data === "string" ? JSON.parse(data) : data;
+            callback({ data: parsedData, type: "message" });
+          } catch (e) {
+            callback({ data: event.data, type: "message" });
+          }
+        };
+
+        currentWs.onerror = (event) => {
+          const err = new Error("WebSocket 连接错误");
+          console.error("WebSocket error:", event);
+          callback({ data: null, error: err, type: "error" });
+        };
+
+        currentWs.onclose = (event) => {
+          if (isManualClose) {
+            const err = new Error(
+              `WebSocket 连接关闭: code=${event.code}, reason=${event.reason}`,
+            );
+            callback({ data: null, error: err, type: "close" });
+            return;
+          }
+
+          if (retriesLeft > 0) {
+            retriesLeft--;
+            const err = new Error(
+              `WebSocket 连接断开，正在重试(${retryCount - retriesLeft}/${retryCount})`,
+            );
+            callback({ data: null, error: err, type: "retry" });
+            setTimeout(connect, 1000);
+          } else {
+            const err = new Error(
+              `WebSocket 连接关闭: code=${event.code}, reason=${event.reason}`,
+            );
+            callback({ data: null, error: err, type: "close" });
+            reject(err);
+          }
+        };
       };
 
-      currentWs.onmessage = (event) => {
-        try {
-          const data = event.data;
-          const parsedData = typeof data === "string" ? JSON.parse(data) : data;
-          callback({ data: parsedData, type: "message" });
-        } catch (e) {
-          callback({ data: event.data, type: "message" });
-        }
-      };
-
-      currentWs.onerror = (event) => {
-        const err = new Error("WebSocket 连接错误");
-        console.error("WebSocket error:", event);
-        callback({ data: null, error: err, type: "error" });
-      };
-
-      currentWs.onclose = (event) => {
-        if (isManualClose) {
-          const err = new Error(
-            `WebSocket 连接关闭: code=${event.code}, reason=${event.reason}`,
-          );
-          callback({ data: null, error: err, type: "close" });
-          return;
-        }
-
-        if (retriesLeft > 0) {
-          retriesLeft--;
-          const err = new Error(
-            `WebSocket 连接断开，正在重试(${retryCount - retriesLeft}/${retryCount})`,
-          );
-          callback({ data: null, error: err, type: "retry" });
-          setTimeout(connect, 1000);
-        } else {
-          const err = new Error(
-            `WebSocket 连接关闭: code=${event.code}, reason=${event.reason}`,
-          );
-          callback({ data: null, error: err, type: "close" });
-        }
-      };
-    };
-
-    connect();
-
-    return {
-      ws: currentWs!,
-      close: () => {
-        isManualClose = true;
-        if (currentWs) {
-          currentWs.close();
-        }
-      },
-    };
+      connect();
+    });
   }
 
   // ==============================================
