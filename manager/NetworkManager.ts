@@ -182,6 +182,13 @@ export class NetworkManager {
             sendData = params.toString();
           } else if (contentType === "application/json") {
             sendData = JSON.stringify(data);
+          } else if (contentType === "multipart/form-data") {
+            // FormData 方式
+            const formData = new FormData();
+            for (const key in data) {
+              formData.append(key, data[key]);
+            }
+            sendData = formData;
           }
         }
 
