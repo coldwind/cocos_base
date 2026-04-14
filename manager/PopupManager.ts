@@ -63,6 +63,12 @@ export class PopupManager {
     }
   }
 
+  public async initByPrefab(prefab: Prefab) {
+    if (this.pfb == null) {
+      this.pfb = prefab;
+    }
+  }
+
   private async getParentNode() {
     let parentNode = instantiate(this.pfb);
     let maskBg = find("mask", parentNode);

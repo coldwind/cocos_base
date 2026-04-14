@@ -12,10 +12,13 @@ export interface WSMessage {
   data: any;
   error?: Error;
   type: "message" | "error" | "close" | "open" | "retry";
+  format: "sys" | "json" | "text";
 }
 
 export interface WSConnection {
   ws: WebSocket;
+  sendJson: (data: any) => void;
+  send: (data: string) => void;
   close: () => void;
 }
 
@@ -61,6 +64,7 @@ export class NetworkManager {
     wsUrl: string,
     callback: (msg: WSMessage) => void,
     retryCount: number = 0,
+    receiveJson: boolean = true,
   ): Promise<WSConnection> {
     return new Promise((resolve, reject) => {
       let currentWs: WebSocket | null = null;
@@ -72,9 +76,20 @@ export class NetworkManager {
 
         currentWs.onopen = () => {
           retriesLeft = retryCount;
-          callback({ data: null, type: "open" });
+          callback({ data: null, type: "open", format: "sys" });
           resolve({
             ws: currentWs!,
+            sendJson: (data: any) => {
+              try {
+                const jsonStr = JSON.stringify(data);
+                currentWs.send(jsonStr);
+              } catch (err) {
+                console.error("sendJson 发送失败：", err);
+              }
+            },
+            send: (data: string) => {
+              currentWs.send(data);
+            },
             close: () => {
               isManualClose = true;
               if (currentWs) {
@@ -86,19 +101,21 @@ export class NetworkManager {
 
         currentWs.onmessage = (event) => {
           try {
-            const data = event.data;
-            const parsedData =
-              typeof data === "string" ? JSON.parse(data) : data;
-            callback({ data: parsedData, type: "message" });
+            if (receiveJson) {
+              const data = JSON.parse(event.data);
+              callback({ data: data, type: "message", format: "json" });
+            } else {
+              callback({ data: event.data, type: "message", format: "text" });
+            }
           } catch (e) {
-            callback({ data: event.data, type: "message" });
+            callback({ data: event.data, type: "message", format: "text" });
           }
         };
 
         currentWs.onerror = (event) => {
           const err = new Error("WebSocket 连接错误");
           console.error("WebSocket error:", event);
-          callback({ data: null, error: err, type: "error" });
+          callback({ data: null, error: err, type: "error", format: "sys" });
         };
 
         currentWs.onclose = (event) => {
@@ -106,7 +123,7 @@ export class NetworkManager {
             const err = new Error(
               `WebSocket 连接关闭: code=${event.code}, reason=${event.reason}`,
             );
-            callback({ data: null, error: err, type: "close" });
+            callback({ data: null, error: err, type: "close", format: "sys" });
             return;
           }
 
@@ -115,13 +132,13 @@ export class NetworkManager {
             const err = new Error(
               `WebSocket 连接断开，正在重试(${retryCount - retriesLeft}/${retryCount})`,
             );
-            callback({ data: null, error: err, type: "retry" });
+            callback({ data: null, error: err, type: "retry", format: "sys" });
             setTimeout(connect, 1000);
           } else {
             const err = new Error(
               `WebSocket 连接关闭: code=${event.code}, reason=${event.reason}`,
             );
-            callback({ data: null, error: err, type: "close" });
+            callback({ data: null, error: err, type: "close", format: "sys" });
             reject(err);
           }
         };

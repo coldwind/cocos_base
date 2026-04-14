@@ -45,6 +45,12 @@ export class ToastManager {
     }
   }
 
+  public async initByPrefab(prefab: Prefab) {
+    if (this.pfb == null) {
+      this.pfb = prefab;
+    }
+  }
+
   async show(txt: string, data?: IYToastOption) {
     try {
       let toastNode = instantiate(this.pfb);
